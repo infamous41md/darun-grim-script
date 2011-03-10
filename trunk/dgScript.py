@@ -1,4 +1,4 @@
-#!C:\Python26\python.exe
+#!C:\Python26\python.exe -u
 
 import sys
 import types
@@ -10,21 +10,20 @@ import re
 import os
 import getopt
 import pickle
+import logging
+import logging.handlers
+import dgGlobals
 
-#import PatchDatabaseWrapper
-#import PatchTimeline
 import DarunGrimSessions
 import DarunGrimDatabaseWrapper
 import DarunGrimAnalyzers
-#import DownloadMSPatches
-#import FileStore
 
 from mako.template import Template
-from HTMLPages import *
 
 #
 config_file = 'DarunGrim3.cfg'
-base_dir = r'D:\projects\darun-grim-scriptable\src'
+base_dir = r'C:\Users\root\Desktop\trunk'
+LOG_FILE = "darun-grim-script.log"
 
 #match_ratio minimum to qualify as a match
 MATCH_THRESHOLD = 0
@@ -56,6 +55,7 @@ class funcDiffManager:
     #
     def __init__(self):
         self.versions = {}
+        self.logger = logging.getLogger(dgGlobals.LOGGER_NAME)
         return
 
     #
@@ -123,7 +123,7 @@ class funcDiffManager:
                 if f.fNext:
                     count += 1
         else:
-            print "Invalid direction " + direction
+            self.logger.error("Invalid direction " + direction)
             sys.exit(1)
 
         return count
@@ -145,20 +145,20 @@ class funcDiffManager:
     def dumpFuncs(self, vers):
         info = self.versions[vers]
         for i in info.values():
-            print "sub_%x" % i.addr
+            self.logger.info("sub_%x" % i.addr)
 
     #
     def showHistory(self):
 
         for key in sorted(self.versions.iterkeys()):
-            print "File %s, %d (%d)(%d) functions" % (key, len(self.versions[key]),
-                    self.numFuncs(key), len(self.versions[key]))
+            self.logger.info("File %s, %d (%d)(%d) functions" % (key, len(self.versions[key]),
+                    self.numFuncs(key), len(self.versions[key])))
             #self.dumpFuncs(key)
-            print "%d matched back, %d matched forward" % (self.matchCount(key, "prev"),
-                                                self.matchCount(key, "next"))
-            print "%d unmatched back, %d unmatched forward" % (self.noMatchCount(key, "prev"),
-                                                self.noMatchCount(key, "next"))
-            print "Number of changes in matched functions: %d\n" % (self.calcNumChanges(key))
+            self.logger.info("%d matched back, %d matched forward" % (self.matchCount(key, "prev"),
+                                                self.matchCount(key, "next")))
+            self.logger.info("%d unmatched back, %d unmatched forward" % (self.noMatchCount(key, "prev"),
+                                                self.noMatchCount(key, "next")))
+            self.logger.info("Number of changes in matched functions: %d\n" % (self.calcNumChanges(key)))
 
     #
     def showChanges(self):
@@ -169,7 +169,7 @@ class funcDiffManager:
         lastVer = sortedVersions[-1]
 
         #follow the history pointers
-        print "Showing history back from version [%s]" % (lastVer)
+        self.logger.info("Showing history back from version [%s]" % (lastVer))
         for func in self.versions[lastVer].itervalues():
             nVersions = 1
             nChanges = 0
@@ -180,11 +180,10 @@ class funcDiffManager:
                 nChanges += func.score
                 func = func.fPrev
 
-            print "Function %#x is present in %d/%d versions, has %d changes" % (fAddr,
-                                        nVersions, totalVersions, nChanges)
+            self.logger.info("Function %#x is present in %d/%d versions, has %d changes" % (fAddr,
+                                        nVersions, totalVersions, nChanges))
 #
 class dgScript(object):
-    DebugLevel = 0
     
     #
     def __init__(self, configFile):
@@ -195,9 +194,11 @@ class dgScript(object):
         self.PatchTemporaryStore = 'Patches'
         self.configFile = configFile
         self.diffMan = funcDiffManager()
+        self.logger = logging.getLogger(dgGlobals.LOGGER_NAME)
 
         #read in config file
         if os.path.exists(configFile):
+            self.logger.debug("Parsing config file [%s]" % configFile)
             fd = open( configFile )
             config_data = fd.read()
             fd.close()
@@ -225,92 +226,25 @@ class dgScript(object):
                         show_detail = 0, reset = 'no'):
         
         databasename = self.GenerateDGFName( source_id, target_id )
-        if self.DebugLevel > 5:
-            print "Database name %s" % (databasename)
+        self.logger.debug("Database name %s" % (databasename))
 
         reset_database = False
         if reset == 'yes':
+            self.logger.debug("Resetting database")
             reset_database = True
 
+        self.logger.debug("Initiating diff of %s vs %s" % (source_id, target_id))
+
         self.DarunGrimSessionsInstance.InitFileDiffByName( source_id, target_id, databasename, reset_database )
+        
+        self.logger.debug("Diff finished")
 
         database = DarunGrimDatabaseWrapper.Database( databasename )
 
         #Check if dgf if correct? check size entries in GetFunctionMatchInfoCount?.
         if database.GetFunctionMatchInfoCount() == 0:
-            print "GOT ZERO"
+            self.logger.error("Match count 0, are you sure plugin is installed and paths are correct?")
             sys.exit(1)
-            #Remove DatabaseName
-            del database
-            self.DarunGrimSessionsInstance.RemoveDiffer ( source_id, target_id )
-            try:
-                os.remove( self.DarunGrimSessionsInstance.DatabaseName )
-            except:
-                print 'Error removing database file', self.DarunGrimSessionsInstance.DatabaseName
-            #Show error page?
-
-            if self.DebugLevel > 3:
-                print 'LogFilename', self.DarunGrimSessionsInstance.LogFilename
-                print 'LogFilenameForSource', self.DarunGrimSessionsInstance.LogFilenameForSource
-                print 'LogFilenameForTarget', self.DarunGrimSessionsInstance.LogFilenameForTarget
-
-            log = ''
-            log_for_source = ''
-            log_for_target = ''
-            try:
-                fd = open( self.DarunGrimSessionsInstance.LogFilename )
-                log = fd.read()
-                fd.close()
-            except:
-                pass
-
-            try:
-                fd = open( self.DarunGrimSessionsInstance.LogFilenameForSource )
-                log_for_source = fd.read()
-                fd.close()
-            except:
-                pass
-
-            try:
-                fd = open( self.DarunGrimSessionsInstance.LogFilenameForTarget )
-                log_for_target = fd.read()
-                fd.close()
-            except:
-                pass
-
-            mytemplate = Template( """<%def name="layoutdata()">
-                    <title>Something is wrong with IDA execution.</title>
-                    <table>
-                    <tr>
-                        <td><b>Log for Source(${source_filename})</b></td>
-                    </tr>
-                    <tr>
-                        <td><pre>${log_for_source}</pre></td>
-                    </tr>
-
-                    <tr>
-                        <td><b>Log for Target(${target_filename})</b></td>
-                    </tr>
-                    <tr>
-                        <td><pre>${log_for_target}</pre></td>
-                    </tr>
-
-                    <tr>
-                        <td><b>Darungrim Plugin Log</b></td>
-                    </tr>
-                    <tr>
-                        <td><pre>${log}</pre></td>
-                    </tr>
-                    <table>
-            </%def>
-            """ + BodyHTML )
-
-            return mytemplate.render( log = log,
-                log_for_source = log_for_source,
-                log_for_target = log_for_target,
-                source_filename = self.DarunGrimSessionsInstance.SourceFileName,
-                target_filename = self.DarunGrimSessionsInstance.TargetFileName
-            )
         else:
             return self.GetFunctionMatchInfo(source_id, target_id)
 
@@ -318,124 +252,20 @@ class dgScript(object):
     def GetFunctionMatchInfo(self, source_id, target_id):
         databasename = self.GenerateDGFName(source_id, target_id)
         database = DarunGrimDatabaseWrapper.Database( databasename)
-        return database.GetFunctionMatchInfo()
+        self.logger.debug("Getting function match info from db %s" % databasename)
+        matchInfo = database.GetFunctionMatchInfo()
+        self.logger.debug("Done getting match info")
+        return matchInfo
     
-    def GetFunctionMatchInfoStr():
-
-        """
-        function_match_infos = self.GetFunctionMatchInfo()
-        
-        for function_match_info in database.GetFunctionMatchInfo():
-            if function_match_info.non_match_count_for_the_source > 0 or \
-                function_match_info.non_match_count_for_the_target > 0 or \
-                function_match_info.match_count_with_modificationfor_the_source > 0:
-                function_match_infos.append( function_match_info )
-
-
-        mytemplate = Template( FunctionmatchInfosTemplateText )
-        return mytemplate.render(
-                source_file_name = source_id,
-                source_file_version_string = "somevers",
-                target_file_name = target_id,
-                target_file_version_string = "somevers",
-                patch_id = patch_id, 
-                patch_name = "patch",
-                download_id = download_id, 
-                download_label = "bla",
-                file_id = file_id, 
-                file_name = "asdf",
-                source_id=source_id, 
-                target_id = target_id, 
-                function_match_infos = function_match_infos,
-                show_detail = 0,
-                project_id = "some-diff"
-            )
-        """
-        return
-
-    def ShowFunctionMatchInfo( self, patch_id, download_id, file_id, source_id, target_id ):
-        return self.GetFunctionMatchInfo( patch_id, download_id, file_id, source_id, target_id )
-
-    def ShowBasicBlockMatchInfo( self, patch_id, download_id, file_id, source_id, target_id, source_address, target_address ):
-        return self.GetDisasmComparisonTextByFunctionAddress( patch_id, download_id, file_id, source_id, target_id, source_address, target_address )
-
-    def GetDisasmComparisonTextByFunctionAddress( self, 
-            patch_id, download_id, file_id, 
-            source_id, target_id, source_address, target_address, 
-            source_function_name = None, target_function_name = None ):
-
-        """
-        patch_database = PatchDatabaseWrapper.Database( self.DatabaseName )
-        source_file = patch_database.GetFileByID( source_id )[0]
-        target_file = patch_database.GetFileByID( target_id )[0]
-        """
-    
-        databasename = self.GenerateDGFName( source_id, target_id )
-        darungrim_database = DarunGrimDatabaseWrapper.Database( databasename )
-
-        source_address = int(source_address)
-        target_address = int(target_address)
-
-        self.DarunGrimSessionsInstance.ShowAddresses( source_id, target_id, source_address, target_address )
-
-        if not source_function_name:
-            source_function_name = darungrim_database.GetBlockName( 1, source_address )
-
-        if not target_function_name:
-            target_function_name = darungrim_database.GetBlockName( 2, target_address )
-        
-        comparison_table = darungrim_database.GetDisasmComparisonTextByFunctionAddress( source_address, target_address )
-        text_comparison_table = []
-
-        left_line_security_implications_score_total = 0
-        right_line_security_implications_score_total = 0
-        for ( left_address, left_lines, right_address, right_lines, match_rate ) in comparison_table:
-            left_line_security_implications_score = 0
-            right_line_security_implications_score = 0
-            if (right_address == 0 and left_address !=0) or match_rate < 100 :
-                ( left_line_security_implications_score, left_line_text ) = self.PatternAnalyzer.GetDisasmLinesWithSecurityImplications( left_lines, right_address == 0 )
-            else:
-                left_line_text = "<p>".join( left_lines )
-
-            if (left_address == 0 and right_address !=0) or match_rate < 100 :
-                ( right_line_security_implications_score, right_line_text ) = self.PatternAnalyzer.GetDisasmLinesWithSecurityImplications( right_lines, left_address == 0 )
-            else:
-                right_line_text = "<p>".join( right_lines )
-
-            left_line_security_implications_score_total += left_line_security_implications_score
-            right_line_security_implications_score_total += right_line_security_implications_score
-            text_comparison_table.append(( left_address, left_line_text, right_address, right_line_text, match_rate ) )
-        
-        ( source_address_infos, target_address_infos ) = darungrim_database.GetBlockAddressMatchTableByFunctionAddress( source_address, target_address )
-        self.DarunGrimSessionsInstance.ColorAddresses( source_id, target_id, source_address_infos, target_address_infos )
-
-        mytemplate = Template( ComparisonTableTemplateText )
-        return mytemplate.render(
-                source_file_name = source_file.filename,
-                source_file_version_string = source_file.version_string,
-                target_file_name = target_file.filename,
-                target_file_version_string = target_file.version_string,
-                source_function_name = source_function_name, 
-                target_function_name = target_function_name,
-                comparison_table = text_comparison_table, 
-                source_id = source_id, 
-                target_id = target_id, 
-                source_address = source_address,
-                target_address = target_address,
-                patch_id = patch_id, 
-                patch_name = patch_database.GetPatchNameByID( patch_id ), 
-                download_id = download_id, 
-                download_label = patch_database.GetDownloadLabelByID( download_id),
-                file_id = file_id,
-                file_name = patch_database.GetFileNameByID( file_id ),  
-            )
-
-    #create a diff database of match information
+    #add the current diff info to the diff manager
     def addDiffs(self, matchInfo, sourceFile, patchFile):
         
         #
+        self.logger.debug("Processing matches")
+
         diffMan = self.diffMan
         for match in matchInfo:
+            
             #check the match rate
             if match.match_rate > MATCH_THRESHOLD:
                 if match.non_match_count_for_the_source > 0 or \
@@ -452,7 +282,7 @@ class dgScript(object):
                 if match.target_address != 0:
                     diffMan.addTarget(patchFile, match.target_address)
             else:
-                print "Serious error: no source or target match"
+                self.logger.error("Serious error: no source or target match")
                 sys.exit(1)
 
     #
@@ -467,6 +297,7 @@ class dgScript(object):
     def diffDir(self, bDir, fileRegEx):
         
         #get a list of all the binaries in the target directory and sort them by version
+        #XXX proper version using pefile
         binaries = []
         for f in glob.glob(bDir + os.sep + fileRegEx):
 
@@ -482,9 +313,10 @@ class dgScript(object):
         #compare each pair of binaries
         for i in xrange(len(binaries)-1):
 
-            print "Diffing %s vs %s" % (binaries[i], binaries[i+1])
-            matchInfo = self.StartDiff(binaries[i], binaries[i+1])
+            self.logger.info("Diffing %s vs %s" % (binaries[i], binaries[i+1]))
+            matchInfo = self.StartDiff(binaries[i], binaries[i+1], reset='yes')
             self.addDiffs(matchInfo, binaries[i], binaries[i+1])
+            self.logger.debug("Finished diff")
 
     #
     def printMatches(self, matchInfo):
@@ -526,6 +358,7 @@ def usage(pName):
     print "Usage %s: [ -c config file ] [ -o original binary ] [ -p patched binary ]\n" \
                     "\t\t[ -d directory of binaries ] [ -r filename reg ex (for directory) ]\n" \
                     "\t\t[ -l load pickle file ] [ -s save to pickle file ]\n" \
+                    "\t\t[ -v debug output ]\n" \
                     % (pName)
     sys.exit(1)
 
@@ -539,9 +372,19 @@ if __name__ == '__main__':
     configFile = config_file
     fileRegEx = "*"
 
+    #log debug messages to file, info messages to console
+    logger = logging.getLogger(dgGlobals.LOGGER_NAME)
+    logger.setLevel(logging.INFO)
+    fileHandler = logging.FileHandler(LOG_FILE, mode='w')
+    fileHandler.setLevel(logging.INFO)
+    consoleHandler = logging.StreamHandler(sys.stdout)
+    consoleHandler.setLevel(logging.INFO)
+    logger.addHandler(fileHandler)
+    logger.addHandler(consoleHandler)
+
     #parse arguments
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "c:o:p:d:r:s:l:")
+        opts, args = getopt.getopt(sys.argv[1:], "c:o:p:d:r:s:l:v")
     except getopt.GetoptError, err:
         print str(err)
         usage(sys.argv[0])
@@ -551,6 +394,11 @@ if __name__ == '__main__':
             configFile = a
         elif o == "-o":
             source = a
+        elif o == "-v":
+            consoleHandler.setLevel(logging.DEBUG)
+            fileHandler.setLevel(logging.DEBUG)
+            logger.setLevel(logging.DEBUG)
+            logger.debug("Debug mode set")
         elif o == "-s":
             savePickle = a
         elif o == "-l":

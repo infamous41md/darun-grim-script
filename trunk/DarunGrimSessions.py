@@ -1,15 +1,11 @@
 import sys
-sys.path.append(r'.')
-sys.path.append(r'T:\mat\Projects\ResearchTools\Binary\StaticAnalysis\DarunGrim2\Bin\DarunGrim2')
-sys.path.append(r'..')
-sys.path.append(r'..\Diff Inspector')
 import os
 
-#import PatchTimeline
 import DarunGrimEngine
-import PatchDatabaseWrapper
 import DarunGrimAnalyzers
 import DarunGrimDatabaseWrapper
+import logging
+import dgGlobals
 
 Differs = {}
 
@@ -22,7 +18,7 @@ class Manager:
     LogFilenameForSource = None
     LogFilenameForTarget = None
 
-    def __init__( self, databasename = 'test.db', binary_store_directory = r'c:\mat\Projects\Binaries', output_directory = r'C:\mat\Projects\DGFs',ida_path = None ):
+    def __init__( self, databasename, binary_store_directory, output_directory,ida_path = None ):
         self.DatabaseFilename = databasename
         self.BinariesStorageDirectory = binary_store_directory
         self.OutputDirectory = output_directory
@@ -37,7 +33,7 @@ class Manager:
                 if os.path.isfile( filename ):
                     self.IDAPath = filename
                     break
-        self.InstallPlugin()
+        #self.InstallPlugin()
 
         if not os.path.isdir( self.OutputDirectory ):
             os.makedirs( self.OutputDirectory )
@@ -49,6 +45,7 @@ class Manager:
             print 'IDAPath=', self.IDAPath
     
         #self.PatchTimelineAnalyzer = PatchTimeline.Analyzer( self.DatabaseFilename )
+        self.logger = logging.getLogger(dgGlobals.LOGGER_NAME)
 
     def InstallPlugin( self ):
         plugins_dst_dir = os.path.join( os.path.dirname( self.IDAPath ), "plugins" )
