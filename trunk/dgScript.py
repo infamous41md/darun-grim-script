@@ -314,7 +314,7 @@ class dgScript(object):
         for i in xrange(len(binaries)-1):
 
             self.logger.info("Diffing %s vs %s" % (binaries[i], binaries[i+1]))
-            matchInfo = self.StartDiff(binaries[i], binaries[i+1], reset='yes')
+            matchInfo = self.StartDiff(binaries[i], binaries[i+1])
             self.addDiffs(matchInfo, binaries[i], binaries[i+1])
             self.logger.debug("Finished diff")
 
