@@ -3,6 +3,8 @@ from sqlalchemy.orm import mapper
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import engine
+import dgGlobals
+import logging
 
 Base=declarative_base()
 
@@ -139,6 +141,7 @@ class FunctionMatchInfo(Base):
 class Database:
     DebugLevel = 2
     def __init__( self, filename ):
+        self.logger = logging.getLogger(dgGlobals.LOGGER_NAME)
         echo = False
         if self.DebugLevel > 2:
             echo = True

@@ -2,7 +2,6 @@ import sys
 import os
 
 import DarunGrimEngine
-import DarunGrimAnalyzers
 import DarunGrimDatabaseWrapper
 import logging
 import dgGlobals
