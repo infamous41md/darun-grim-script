@@ -16,7 +16,6 @@ import dgGlobals
 
 import DarunGrimSessions
 import DarunGrimDatabaseWrapper
-import DarunGrimAnalyzers
 
 from mako.template import Template
 
@@ -61,6 +60,8 @@ class funcDiffManager:
     #
     def addDiff(self, srcVers, srcAddr, dstVers, dstAddr, changeScore = 0):
 
+        self.logger.debug("Adding [%s, %#x] [%s, %#x]" % (srcVers, srcAddr,
+                                dstVers, dstAddr))
         #get the dictionaries for each version
         srcDict = self.versions.setdefault(srcVers, {})
         dstDict = self.versions.setdefault(dstVers, {})
@@ -85,21 +86,20 @@ class funcDiffManager:
         dstMatch.score = changeScore
 
     #
-    def addNoMatch(self, isSrc, vers, addr):
-        if isSrc:
-            d = self.versions.setdefault(vers, {})
-        else:
-            d = self.versions.setdefault(vers, {})
-
-        d[addr] = funcDiff(addr, vers)
+    def addNoMatch(self, vers, addr):
+        d = self.versions.setdefault(vers, {})
+        if addr not in d:
+            d[addr] = funcDiff(addr, vers)
 
     #
     def addSrc(self, vers, addr):
-        return self.addNoMatch(True, vers, addr)
+        self.logger.debug("Adding unmatched source [%s, %#x]" % (vers, addr))
+        return self.addNoMatch(vers, addr)
 
     #
     def addTarget(self, vers, addr):
-        return self.addNoMatch(False, vers, addr)
+        self.logger.debug("Adding unmatched target [%s, %#x]" % (vers, addr))
+        return self.addNoMatch(vers, addr)
 
     #
     def calcNumChanges(self, vers):
@@ -136,10 +136,7 @@ class funcDiffManager:
     #
     def numFuncs(self, vers):
         info = self.versions[vers]
-        s = set()
-        for i in info.values():
-            s.add(i.addr)
-        return len(s)
+        return len(info)
 
     #
     def dumpFuncs(self, vers):
@@ -151,8 +148,8 @@ class funcDiffManager:
     def showHistory(self):
 
         for key in sorted(self.versions.iterkeys()):
-            self.logger.info("File %s, %d (%d)(%d) functions" % (key, len(self.versions[key]),
-                    self.numFuncs(key), len(self.versions[key])))
+            self.logger.info("File %s, %d functions" % (key,
+                                                self.numFuncs(key)))
             #self.dumpFuncs(key)
             self.logger.info("%d matched back, %d matched forward" % (self.matchCount(key, "prev"),
                                                 self.matchCount(key, "next")))
@@ -170,11 +167,11 @@ class funcDiffManager:
 
         #follow the history pointers
         self.logger.info("Showing history back from version [%s]" % (lastVer))
-        for func in self.versions[lastVer].itervalues():
+        for fAddr in sorted(self.versions[lastVer].keys()):
             nVersions = 1
             nChanges = 0
 
-            fAddr = func.addr
+            func = self.versions[lastVer][fAddr]
             while func.fPrev != None:
                 nVersions += 1
                 nChanges += func.score
@@ -182,6 +179,52 @@ class funcDiffManager:
 
             self.logger.info("Function %#x is present in %d/%d versions, has %d changes" % (fAddr,
                                         nVersions, totalVersions, nChanges))
+
+    #
+    def emitSVG(self):
+
+        sortedVersions = sorted(self.versions.keys())
+        totalVersions = len(sortedVersions)
+        firstVer = sortedVersions[0]
+        lastVer = sortedVersions[-1]
+
+        curX = curY = 0
+        width = 40
+        height = 20
+        maxX = 1200
+        funcs = ""
+        
+        #follow the history pointers
+        for fAddr in sorted(self.versions[lastVer].keys()):
+            nVersions = 1
+            nChanges = 0
+
+            func = self.versions[lastVer][fAddr]
+            while func.fPrev != None:
+                nVersions += 1
+                nChanges += func.score
+                func = func.fPrev
+
+            if nChanges == 0:
+                color = "rgb(0,255,255)"
+            else:
+                color = "rgb(%d,0,0)" % (255 - (0x10*nChanges))
+            
+            funcs += "\n<rect width='%d' height='%d' x='%d' y='%d' tooltip='enable'" % (width, height, curX, curY)
+            funcs += " style='fill:%s;stroke-width:2;stroke:rgb(0,0,0)'>" % (color)
+            funcs += "<title>function %#x</title></rect>" % (fAddr)
+            
+            if curX == maxX:
+                curX = 0
+                curY += height
+            else:
+                curX += width
+
+        #
+        print "<svg height='%dpx' version='1.1' xmlns='http://www.w3.org/2000/svg'>" % (curY)
+        print funcs
+        print "</svg>"
+
 #
 class dgScript(object):
     
@@ -214,7 +257,6 @@ class dgScript(object):
         #Operation
         self.DarunGrimSessionsInstance = DarunGrimSessions.Manager( self.DatabaseName,
                                 self.BinariesStorageDirectory, self.DGFDirectory, self.IDAPath )
-        self.PatternAnalyzer = DarunGrimAnalyzers.PatternAnalyzer()
 
     #
     def GenerateDGFName(self, origFile, patchFile):
@@ -256,12 +298,22 @@ class dgScript(object):
         matchInfo = database.GetFunctionMatchInfo()
         self.logger.debug("Done getting match info")
         return matchInfo
+
+    #
+    def getCodeRange(self, binary):
+        pe  = pefile.PE(binary)
+        startAddr = pe.OPTIONAL_HEADER.ImageBase + pe.OPTIONAL_HEADER.BaseOfCode
+        endAddr = startAddr + pe.OPTIONAL_HEADER.SizeOfCode
+        return (startAddr, endAddr)
     
     #add the current diff info to the diff manager
     def addDiffs(self, matchInfo, sourceFile, patchFile):
         
         #
         self.logger.debug("Processing matches")
+
+        srcStart, srcEnd = self.getCodeRange(sourceFile)
+        patchStart, patchEnd = self.getCodeRange(patchFile)
 
         diffMan = self.diffMan
         for match in matchInfo:
@@ -274,12 +326,20 @@ class dgScript(object):
                     changed = 1
                 else:
                     changed = 0
+
+                if match.source_address < srcStart or match.source_address >= srcEnd \
+                        or match.target_address < patchStart \
+                        or match.target_address >= patchEnd:
+                    continue
+
                 diffMan.addDiff(sourceFile, match.source_address, patchFile, match.target_address,
                         changed)
             elif match.source_address != 0 or match.target_address != 0:
-                if match.source_address != 0:
+                if match.source_address != 0 and \
+                        match.source_address >= srcStart and match.source_address < srcEnd:
                     diffMan.addSrc(sourceFile, match.source_address)
-                if match.target_address != 0:
+                if match.target_address != 0 and \
+                        match.target_address >= patchStart and match.target_address < patchEnd:
                     diffMan.addTarget(patchFile, match.target_address)
             else:
                 self.logger.error("Serious error: no source or target match")
@@ -292,6 +352,10 @@ class dgScript(object):
     #
     def showChanges(self):
         self.diffMan.showChanges()
+
+    #
+    def emitSVG(self):
+        self.diffMan.emitSVG()
 
     #
     def diffDir(self, bDir, fileRegEx):
@@ -309,6 +373,10 @@ class dgScript(object):
             binaries.append(f)
 
         binaries = sorted(binaries)
+
+        self.logger.debug("Order of diffing:")
+        for binary in binaries:
+            self.logger.debug("Binary: " + binary)
 
         #compare each pair of binaries
         for i in xrange(len(binaries)-1):
@@ -429,8 +497,9 @@ if __name__ == '__main__':
             matchInfo = dScript.StartDiff(source, target)
             dScript.addDiffs(matchInfo, source, target)
     #
-    dScript.showHistory()
-    dScript.showChanges()
+    #dScript.showHistory()
+    #dScript.showChanges()
+    dScript.emitSVG()
 
     if savePickle:
         f = open(savePickle, "wb")
