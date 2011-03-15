@@ -426,7 +426,7 @@ def usage(pName):
     print "Usage %s: [ -c config file ] [ -o original binary ] [ -p patched binary ]\n" \
                     "\t\t[ -d directory of binaries ] [ -r filename reg ex (for directory) ]\n" \
                     "\t\t[ -l load pickle file ] [ -s save to pickle file ]\n" \
-                    "\t\t[ -v debug output ]\n" \
+                    "\t\t[ -v debug output ] [ -g emit svg ]\n" \
                     % (pName)
     sys.exit(1)
 
@@ -436,6 +436,7 @@ if __name__ == '__main__':
     import io
 
     #
+    svg = False
     savePickle = loadPickle = source = target = binDir = None
     configFile = config_file
     fileRegEx = "*"
@@ -452,7 +453,7 @@ if __name__ == '__main__':
 
     #parse arguments
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "c:o:p:d:r:s:l:v")
+        opts, args = getopt.getopt(sys.argv[1:], "c:o:p:d:r:s:l:vg")
     except getopt.GetoptError, err:
         print str(err)
         usage(sys.argv[0])
@@ -462,6 +463,8 @@ if __name__ == '__main__':
             configFile = a
         elif o == "-o":
             source = a
+        elif o == "-g":
+            svg = True
         elif o == "-v":
             consoleHandler.setLevel(logging.DEBUG)
             fileHandler.setLevel(logging.DEBUG)
@@ -497,9 +500,11 @@ if __name__ == '__main__':
             matchInfo = dScript.StartDiff(source, target)
             dScript.addDiffs(matchInfo, source, target)
     #
-    #dScript.showHistory()
-    #dScript.showChanges()
-    dScript.emitSVG()
+    if svg:
+        dScript.emitSVG()
+    else:
+        dScript.showHistory()
+        dScript.showChanges()
 
     if savePickle:
         f = open(savePickle, "wb")
