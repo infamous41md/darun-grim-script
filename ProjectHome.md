@@ -1,0 +1,1 @@
+This is the darun grim 3 source hacked up and trimmed down to provide a scriptable interface. All of the hard work is thanks to the darun grim creator, and all bastardizations are probably my fault.
